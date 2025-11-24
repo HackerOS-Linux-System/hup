@@ -1,0 +1,22 @@
+apt:
+  enabled: true
+  upgrade: true
+  dist_upgrade: false
+  autoremove: true
+  autoclean: true
+flatpak:
+  enabled: true
+fwupd:
+  enabled: false
+snap:
+  enabled: false
+notify:
+  enabled: true
+  reboot_message: "HackerOS: Reboot required after updates!"
+log:
+  file: "/var/log/hup.log"
+  level: "info"
+style:
+  info_color: "cyan"
+  error_color: "red"
+  success_color: "green"
