@@ -1,0 +1,7 @@
+// sudo
+// systemctl
+// hup
+> sudo systemctl daemon-reload
+> sudo systemctl enable hup.service
+> sudo systemctl start hup.service
+> hup
