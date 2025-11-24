@@ -191,6 +191,10 @@ def update_snap(config : Hash(YAML::Any, YAML::Any)) : Bool
   success
 end
 def main
+  if LibC.getuid != 0
+    puts "hup requires sudo"
+    exit 1
+  end
   # Determine the user's home directory even when run with sudo
   home = if ENV.has_key?("SUDO_USER")
            "/home/#{ENV["SUDO_USER"]}"
