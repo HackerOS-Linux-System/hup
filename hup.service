@@ -4,7 +4,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/hup
+ExecStart=/usr/bin/hup
 User=root
 Group=root
 StandardOutput=append:/var/log/hup.log
