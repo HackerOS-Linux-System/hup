@@ -1,0 +1,3 @@
+# Set target for dist-upgrade (e.g., for upgrading to newer Debian)
+version: "13"
+codename: "trixie"
