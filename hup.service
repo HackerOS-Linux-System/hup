@@ -1,0 +1,15 @@
+[Unit]
+Description=Hacker Updater - Automatic APT and Flatpak updates on boot
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/hup
+User=root
+Group=root
+StandardOutput=null
+StandardError=null
+Restart=no
+
+[Install]
+WantedBy=multi-user.target
