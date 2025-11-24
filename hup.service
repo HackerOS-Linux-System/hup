@@ -4,11 +4,11 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/hup
+ExecStart=/usr/local/bin/hup
 User=root
 Group=root
-StandardOutput=null
-StandardError=null
+StandardOutput=append:/var/log/hup.log
+StandardError=inherit
 Restart=no
 
 [Install]
