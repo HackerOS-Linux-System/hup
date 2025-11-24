@@ -1,1 +1,12 @@
+name: hup
+version: 0.1.0
 
+authors:
+  - Your Name <your.email@example.com>
+
+description: |
+  Hacker Updater - CLI tool for automatic updates on system start.
+
+crystal: ">= 1.0.0"
+
+license: MIT
