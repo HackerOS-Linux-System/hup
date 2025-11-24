@@ -3,29 +3,28 @@ require "file"
 require "dir"
 require "yaml"
 require "json"
-require "http/client"
 require "log"
 
 # Simple ANSI color codes
 COLOR_CODES = {
-  "black" => "\e[30m",
-  "red" => "\e[31m",
-  "green" => "\e[32m",
-  "yellow" => "\e[33m",
-  "blue" => "\e[34m",
+  "black"   => "\e[30m",
+  "red"     => "\e[31m",
+  "green"   => "\e[32m",
+  "yellow"  => "\e[33m",
+  "blue"    => "\e[34m",
   "magenta" => "\e[35m",
-  "cyan" => "\e[36m",
-  "white" => "\e[37m",
-  "reset" => "\e[0m",
+  "cyan"    => "\e[36m",
+  "white"   => "\e[37m",
+  "reset"   => "\e[0m",
 }
 # Default config
 DEFAULT_CONFIG = {
   "apt" => {
-    "enabled" => true,
-    "upgrade" => true,
+    "enabled"      => true,
+    "upgrade"      => true,
     "dist_upgrade" => false,
-    "autoremove" => true,
-    "autoclean" => true,
+    "autoremove"   => true,
+    "autoclean"    => true,
   },
   "flatpak" => {
     "enabled" => true,
@@ -37,16 +36,16 @@ DEFAULT_CONFIG = {
     "enabled" => false,
   },
   "notify" => {
-    "enabled" => true,
+    "enabled"        => true,
     "reboot_message" => "HackerOS: Reboot required after updates!",
   },
   "log" => {
-    "file" => "/var/log/hup.log",
+    "file"  => "/var/log/hup.log",
     "level" => "info",
   },
   "style" => {
-    "info_color" => "cyan",
-    "error_color" => "red",
+    "info_color"    => "cyan",
+    "error_color"   => "red",
     "success_color" => "green",
   },
 }
@@ -67,10 +66,11 @@ def parse_css(file_path : String) : Hash(String, String)
 end
 # Run shell command with output capture
 def run_command(cmd : String, args : Array(String)) : {Bool, String, String}
-  process = Process.new(cmd, args, output: Process::Redirect::Pipe, error: Process::Redirect::Pipe)
-  status = process.wait
-  out = process.output.gets_to_end
-  err = process.error.gets_to_end
+  stdout = IO::Memory.new
+  stderr = IO::Memory.new
+  status = Process.run(cmd, args: args, output: stdout, error: stderr)
+  out = stdout.to_s
+  err = stderr.to_s
   if status.success?
     Log.info { "Command '#{cmd} #{args.join(" ")}' succeeded: #{out}" }
   else
@@ -95,7 +95,7 @@ def save_current_version(version : String, codename : String)
   Dir.mkdir_p(dir) unless Dir.exists?(dir)
   file = File.new("#{dir}/version.json", "w")
   json = {
-    "version" => version,
+    "version"  => version,
     "codename" => codename,
   }.to_json
   file.print(json)
@@ -124,7 +124,12 @@ def update_apt(config : Hash(YAML::Any, YAML::Any), current_codename : String) :
   # Check for dist-upgrade if enabled
   if config[apt_key].as_h[YAML::Any.new("dist_upgrade")].as_bool
     # Check target from ~/.hackeros/hup.yaml
-    target_file = "#{ENV["HOME"]}/.hackeros/hup.yaml"
+    home = if ENV.has_key?("SUDO_USER")
+             "/home/#{ENV["SUDO_USER"]}"
+           else
+             ENV["HOME"]
+           end
+    target_file = "#{home}/.hackeros/hup.yaml"
     if File.exists?(target_file)
       target_yaml = YAML.parse(File.read(target_file))
       target_version = target_yaml.as_h[YAML::Any.new("version")]?.try(&.as_s) || "unknown"
@@ -186,8 +191,14 @@ def update_snap(config : Hash(YAML::Any, YAML::Any)) : Bool
   success
 end
 def main
+  # Determine the user's home directory even when run with sudo
+  home = if ENV.has_key?("SUDO_USER")
+           "/home/#{ENV["SUDO_USER"]}"
+         else
+           ENV["HOME"]
+         end
   # Load config from YAML
-  config_file = "#{ENV["HOME"]}/.config/hacker/hup.yml"
+  config_file = "#{home}/.config/hacker/hup.yml"
   default_config = YAML.parse(DEFAULT_CONFIG.to_yaml).as_h
   user_config = File.exists?(config_file) ? YAML.parse(File.read(config_file)).as_h : Hash(YAML::Any, YAML::Any).new
   config = default_config.merge(user_config)
@@ -200,10 +211,13 @@ def main
           when "error" then Log::Severity::Error
           else Log::Severity::Info
           end
-  backend = Log::IOBackend.new(File.open(log_file, "a"))
-  Log.setup(level, backend)
+  file_backend = Log::IOBackend.new(File.open(log_file, "a"))
+  console_backend = Log::IOBackend.new(STDOUT)
+  Log.builder.clear
+  Log.builder.bind("*", level, file_backend)
+  Log.builder.bind("*", level, console_backend)
   # Load CSS styles and override config styles
-  css_file = "#{ENV["HOME"]}/.config/hacker/hup.css"
+  css_file = "#{home}/.config/hacker/hup.css"
   css_styles = parse_css(css_file)
   style_key = YAML::Any.new("style")
   config_style = config[style_key].as_h
