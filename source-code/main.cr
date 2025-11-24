@@ -7,15 +7,23 @@ require "log"
 
 # Simple ANSI color codes
 COLOR_CODES = {
-  "black"   => "\e[30m",
-  "red"     => "\e[31m",
-  "green"   => "\e[32m",
-  "yellow"  => "\e[33m",
-  "blue"    => "\e[34m",
-  "magenta" => "\e[35m",
-  "cyan"    => "\e[36m",
-  "white"   => "\e[37m",
-  "reset"   => "\e[0m",
+  "black"          => "\e[30m",
+  "red"            => "\e[31m",
+  "green"          => "\e[32m",
+  "yellow"         => "\e[33m",
+  "blue"           => "\e[34m",
+  "magenta"        => "\e[35m",
+  "cyan"           => "\e[36m",
+  "white"          => "\e[37m",
+  "bright_black"   => "\e[90m",
+  "bright_red"     => "\e[91m",
+  "bright_green"   => "\e[92m",
+  "bright_yellow"  => "\e[93m",
+  "bright_blue"    => "\e[94m",
+  "bright_magenta" => "\e[95m",
+  "bright_cyan"    => "\e[96m",
+  "bright_white"   => "\e[97m",
+  "reset"          => "\e[0m",
 }
 # Default config
 DEFAULT_CONFIG = {
@@ -47,6 +55,7 @@ DEFAULT_CONFIG = {
     "info_color"    => "cyan",
     "error_color"   => "red",
     "success_color" => "green",
+    "warning_color" => "yellow",
   },
 }
 # Simple CSS parser for style config
@@ -192,7 +201,7 @@ def update_snap(config : Hash(YAML::Any, YAML::Any)) : Bool
 end
 def main
   if LibC.getuid != 0
-    puts "hup requires sudo"
+    puts "#{COLOR_CODES["red"]}hup requires sudo#{COLOR_CODES["reset"]}"
     exit 1
   end
   # Determine the user's home directory even when run with sudo
@@ -217,6 +226,20 @@ def main
           end
   file_backend = Log::IOBackend.new(File.open(log_file, "a"))
   console_backend = Log::IOBackend.new(STDOUT)
+  # Custom formatter for console with colors
+  console_backend.formatter = Log::Formatter.new do |entry, io|
+    label = entry.severity.label
+    style_key = YAML::Any.new("style")
+    config_style = config[style_key].as_h
+    color = case entry.severity
+            when .debug? then COLOR_CODES["blue"]
+            when .info?  then COLOR_CODES[config_style[YAML::Any.new("info_color")].as_s]? || COLOR_CODES["cyan"]
+            when .warn?  then COLOR_CODES[config_style[YAML::Any.new("warning_color")].as_s]? || COLOR_CODES["yellow"]
+            when .error? then COLOR_CODES[config_style[YAML::Any.new("error_color")].as_s]? || COLOR_CODES["red"]
+            else COLOR_CODES["white"]
+            end
+    io << color << label.upcase << ": " << entry.message << COLOR_CODES["reset"]
+  end
   Log.builder.clear
   Log.builder.bind("*", level, file_backend)
   Log.builder.bind("*", level, console_backend)
@@ -234,6 +257,9 @@ def main
     end
     if success_color = css_styles["success-color"]?
       config_style[YAML::Any.new("success_color")] = YAML::Any.new(success_color)
+    end
+    if warning_color = css_styles["warning-color"]?
+      config_style[YAML::Any.new("warning_color")] = YAML::Any.new(warning_color)
     end
   end
   # Note: Since this is background CLI, styles can be used if running manually with output,
@@ -255,7 +281,9 @@ def main
   if reboot_required? && config[notify_key].as_h[YAML::Any.new("enabled")].as_bool
     send_notification(config[notify_key].as_h[YAML::Any.new("reboot_message")].as_s)
   end
-  Log.info { "Hacker Updater finished. Success: #{overall_success}" }
+  success_color = COLOR_CODES[config_style[YAML::Any.new("success_color")].as_s]? || COLOR_CODES["green"]
+  status_message = overall_success ? "#{success_color}true#{COLOR_CODES["reset"]}" : "#{COLOR_CODES["red"]}false#{COLOR_CODES["reset"]}"
+  Log.info { "Hacker Updater finished. Success: #{status_message}" }
 end
 # Run main if not daemon or for testing
 main
