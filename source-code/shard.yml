@@ -1,12 +1,12 @@
 name: hup
-version: 0.1.0
+version: 0.1
 
 authors:
-  - Your Name <your.email@example.com>
+  - HackerOS Team <hackeros068@gmail.com>
 
 description: |
   Hacker Updater - CLI tool for automatic updates on system start.
 
 crystal: ">= 1.0.0"
 
-license: MIT
+license: APACHE-2
