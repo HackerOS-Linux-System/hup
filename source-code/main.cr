@@ -4,21 +4,20 @@ require "dir"
 require "yaml"
 require "json"
 require "http/client"
-require "logger"
+require "log"
 
 # Simple ANSI color codes
 COLOR_CODES = {
-  "black"   => "\e[30m",
-  "red"     => "\e[31m",
-  "green"   => "\e[32m",
-  "yellow"  => "\e[33m",
-  "blue"    => "\e[34m",
+  "black" => "\e[30m",
+  "red" => "\e[31m",
+  "green" => "\e[32m",
+  "yellow" => "\e[33m",
+  "blue" => "\e[34m",
   "magenta" => "\e[35m",
-  "cyan"    => "\e[36m",
-  "white"   => "\e[37m",
-  "reset"   => "\e[0m",
+  "cyan" => "\e[36m",
+  "white" => "\e[37m",
+  "reset" => "\e[0m",
 }
-
 # Default config
 DEFAULT_CONFIG = {
   "apt" => {
@@ -51,7 +50,6 @@ DEFAULT_CONFIG = {
     "success_color" => "green",
   },
 }
-
 # Simple CSS parser for style config
 def parse_css(file_path : String) : Hash(String, String)
   styles = Hash(String, String).new
@@ -67,21 +65,19 @@ def parse_css(file_path : String) : Hash(String, String)
   end
   styles
 end
-
 # Run shell command with output capture
-def run_command(cmd : String, args : Array(String), log : Logger) : {Bool, String, String}
+def run_command(cmd : String, args : Array(String)) : {Bool, String, String}
   process = Process.new(cmd, args, output: Process::Redirect::Pipe, error: Process::Redirect::Pipe)
   status = process.wait
   out = process.output.gets_to_end
   err = process.error.gets_to_end
   if status.success?
-    log.info("Command '#{cmd} #{args.join(" ")}' succeeded: #{out}")
+    Log.info { "Command '#{cmd} #{args.join(" ")}' succeeded: #{out}" }
   else
-    log.error("Command '#{cmd} #{args.join(" ")}' failed: #{err}")
+    Log.error { "Command '#{cmd} #{args.join(" ")}' failed: #{err}" }
   end
   {status.success?, out, err}
 end
-
 # Get current Debian version and codename
 def get_current_debian_info : {String, String}
   if File.exists?("/etc/os-release")
@@ -93,55 +89,49 @@ def get_current_debian_info : {String, String}
     {"unknown", "unknown"}
   end
 end
-
 # Save current version to JSON
 def save_current_version(version : String, codename : String)
   dir = "/var/cache/hup"
   Dir.mkdir_p(dir) unless Dir.exists?(dir)
   file = File.new("#{dir}/version.json", "w")
   json = {
-    "version"  => version,
+    "version" => version,
     "codename" => codename,
   }.to_json
   file.print(json)
   file.close
 end
-
 # Check if reboot is required
 def reboot_required? : Bool
   File.exists?("/var/run/reboot-required")
 end
-
 # Send desktop notification
-def send_notification(message : String, log : Logger)
-  success, _, err = run_command("notify-send", ["-u", "critical", "Hacker Updater", message], log)
+def send_notification(message : String)
+  success, _, err = run_command("notify-send", ["-u", "critical", "Hacker Updater", message])
   unless success
-    log.error("Notification failed: #{err}")
+    Log.error { "Notification failed: #{err}" }
   end
 end
-
 # Update APT
-def update_apt(config : Hash, log : Logger, current_codename : String) : Bool
-  return true unless config["apt"]["enabled"].as_bool
-
+def update_apt(config : Hash(YAML::Any, YAML::Any), current_codename : String) : Bool
+  apt_key = YAML::Any.new("apt")
+  return true unless config[apt_key].as_h[YAML::Any.new("enabled")].as_bool
   # Regular update and upgrade
-  run_command("apt", ["update", "-qq"], log)
-  if config["apt"]["upgrade"].as_bool
-    run_command("apt", ["upgrade", "-y", "-qq"], log)
+  run_command("apt", ["update", "-qq"])
+  if config[apt_key].as_h[YAML::Any.new("upgrade")].as_bool
+    run_command("apt", ["upgrade", "-y", "-qq"])
   end
-
   # Check for dist-upgrade if enabled
-  if config["apt"]["dist_upgrade"].as_bool
+  if config[apt_key].as_h[YAML::Any.new("dist_upgrade")].as_bool
     # Check target from ~/.hackeros/hup.yaml
     target_file = "#{ENV["HOME"]}/.hackeros/hup.yaml"
     if File.exists?(target_file)
       target_yaml = YAML.parse(File.read(target_file))
-      target_version = target_yaml["version"]?.try(&.as_s) || "unknown"
-      target_codename = target_yaml["codename"]?.try(&.as_s) || "unknown"
+      target_version = target_yaml.as_h[YAML::Any.new("version")]?.try(&.as_s) || "unknown"
+      target_codename = target_yaml.as_h[YAML::Any.new("codename")]?.try(&.as_s) || "unknown"
       current_version, _ = get_current_debian_info
-
-      if target_version > current_version
-        log.info("Detected newer Debian version (#{target_version} / #{target_codename}). Performing dist-upgrade.")
+      if current_version != "unknown" && target_version != "unknown" && target_version.to_i > current_version.to_i
+        Log.info { "Detected newer Debian version (#{target_version} / #{target_codename}). Performing dist-upgrade." }
         # Edit sources.list to new codename (WARNING: This can be risky!)
         sources_files = ["/etc/apt/sources.list"] + Dir.glob("/etc/apt/sources.list.d/*.list")
         sources_files.each do |file|
@@ -149,116 +139,105 @@ def update_apt(config : Hash, log : Logger, current_codename : String) : Bool
             content = File.read(file)
             new_content = content.gsub(current_codename, target_codename)
             File.write(file, new_content)
-            log.info("Updated sources in #{file} to #{target_codename}")
+            Log.info { "Updated sources in #{file} to #{target_codename}" }
           end
         end
         # Now do full dist-upgrade
-        run_command("apt", ["update", "-qq"], log)
-        success, _, _ = run_command("apt", ["full-upgrade", "-y", "-qq"], log)
+        run_command("apt", ["update", "-qq"])
+        success, _, _ = run_command("apt", ["full-upgrade", "-y", "-qq"])
         if success
           # Update saved version
           save_current_version(target_version, target_codename)
         end
         return success
       else
-        log.info("No newer version in config. Skipping dist-upgrade.")
+        Log.info { "No newer version in config. Skipping dist-upgrade." }
       end
     else
-      log.info("No target config at #{target_file}. Skipping dist-upgrade.")
+      Log.info { "No target config at #{target_file}. Skipping dist-upgrade." }
     end
   end
-
   # Autoremove and autoclean
-  if config["apt"]["autoremove"].as_bool
-    run_command("apt", ["autoremove", "-y", "-qq"], log)
+  if config[apt_key].as_h[YAML::Any.new("autoremove")].as_bool
+    run_command("apt", ["autoremove", "-y", "-qq"])
   end
-  if config["apt"]["autoclean"].as_bool
-    run_command("apt", ["autoclean", "-qq"], log)
+  if config[apt_key].as_h[YAML::Any.new("autoclean")].as_bool
+    run_command("apt", ["autoclean", "-qq"])
   end
-
   true
 end
-
 # Update Flatpak
-def update_flatpak(config : Hash, log : Logger) : Bool
-  return true unless config["flatpak"]["enabled"].as_bool
-  success, _, _ = run_command("flatpak", ["update", "-y", "--noninteractive"], log)
+def update_flatpak(config : Hash(YAML::Any, YAML::Any)) : Bool
+  return true unless config[YAML::Any.new("flatpak")].as_h[YAML::Any.new("enabled")].as_bool
+  success, _, _ = run_command("flatpak", ["update", "-y", "--noninteractive"])
   success
 end
-
 # Update FWUPD
-def update_fwupd(config : Hash, log : Logger) : Bool
-  return true unless config["fwupd"]["enabled"].as_bool
-  run_command("fwupdmgr", ["refresh", "--force"], log)
-  success, _, _ = run_command("fwupdmgr", ["update", "-y"], log)
+def update_fwupd(config : Hash(YAML::Any, YAML::Any)) : Bool
+  return true unless config[YAML::Any.new("fwupd")].as_h[YAML::Any.new("enabled")].as_bool
+  run_command("fwupdmgr", ["refresh", "--force"])
+  success, _, _ = run_command("fwupdmgr", ["update", "-y"])
   success
 end
-
 # Update Snap
-def update_snap(config : Hash, log : Logger) : Bool
-  return true unless config["snap"]["enabled"].as_bool
-  success, _, _ = run_command("snap", ["refresh"], log)
+def update_snap(config : Hash(YAML::Any, YAML::Any)) : Bool
+  return true unless config[YAML::Any.new("snap")].as_h[YAML::Any.new("enabled")].as_bool
+  success, _, _ = run_command("snap", ["refresh"])
   success
 end
-
 def main
-  # Setup logger
-  log_file = "/var/log/hup.log" # Default, will override from config
-  log = Logger.new(File.new(log_file, "a"))
-  log.level = Logger::INFO
-
   # Load config from YAML
   config_file = "#{ENV["HOME"]}/.config/hacker/hup.yml"
-  config = DEFAULT_CONFIG
-  if File.exists?(config_file)
-    user_config = YAML.parse(File.read(config_file)).as_h
-    config = config.merge(user_config)
-    log_file = config["log"]["file"].as_s if config["log"]? && config["log"]["file"]?
-    log = Logger.new(File.new(log_file, "a")) # Reopen with new file if changed
-    log.level = case config["log"]["level"].as_s.downcase
-                when "debug" then Logger::DEBUG
-                when "error" then Logger::ERROR
-                else Logger::INFO
-                end
-  end
-
+  default_config = YAML.parse(DEFAULT_CONFIG.to_yaml).as_h
+  user_config = File.exists?(config_file) ? YAML.parse(File.read(config_file)).as_h : Hash(YAML::Any, YAML::Any).new
+  config = default_config.merge(user_config)
+  # Setup log
+  log_key = YAML::Any.new("log")
+  log_file = config[log_key].as_h[YAML::Any.new("file")].as_s
+  level_str = config[log_key].as_h[YAML::Any.new("level")].as_s.downcase
+  level = case level_str
+          when "debug" then Log::Severity::Debug
+          when "error" then Log::Severity::Error
+          else Log::Severity::Info
+          end
+  backend = Log::IOBackend.new(File.open(log_file, "a"))
+  Log.setup(level, backend)
   # Load CSS styles and override config styles
   css_file = "#{ENV["HOME"]}/.config/hacker/hup.css"
   css_styles = parse_css(css_file)
+  style_key = YAML::Any.new("style")
+  config_style = config[style_key].as_h
   if css_styles.any?
-    config["style"] = config["style"].merge({
-      "info_color"    => css_styles["info-color"]? || config["style"]["info_color"],
-      "error_color"   => css_styles["error-color"]? || config["style"]["error_color"],
-      "success_color" => css_styles["success-color"]? || config["style"]["success_color"],
-    })
+    if info_color = css_styles["info-color"]?
+      config_style[YAML::Any.new("info_color")] = YAML::Any.new(info_color)
+    end
+    if error_color = css_styles["error-color"]?
+      config_style[YAML::Any.new("error_color")] = YAML::Any.new(error_color)
+    end
+    if success_color = css_styles["success-color"]?
+      config_style[YAML::Any.new("success_color")] = YAML::Any.new(success_color)
+    end
   end
-
   # Note: Since this is background CLI, styles can be used if running manually with output,
   # e.g., puts "#{COLOR_CODES[config["style"]["info_color"].as_s]}Info message#{COLOR_CODES["reset"]}"
   # But for background, we log plain text.
-
-  log.info("Hacker Updater started at #{Time.local}")
-
+  Log.info { "Hacker Updater started at #{Time.local}" }
   # Get and save current version
   current_version, current_codename = get_current_debian_info
   save_current_version(current_version, current_codename)
-  log.info("Current Debian: version #{current_version}, codename #{current_codename}")
-
+  Log.info { "Current Debian: version #{current_version}, codename #{current_codename}" }
   # Perform updates
-  apt_success = update_apt(config, log, current_codename)
-  flatpak_success = update_flatpak(config, log)
-  fwupd_success = update_fwupd(config, log)
-  snap_success = update_snap(config, log)
-
+  apt_success = update_apt(config, current_codename)
+  flatpak_success = update_flatpak(config)
+  fwupd_success = update_fwupd(config)
+  snap_success = update_snap(config)
   overall_success = apt_success && flatpak_success && fwupd_success && snap_success
-
   # Check for reboot
-  if reboot_required? && config["notify"]["enabled"].as_bool
-    send_notification(config["notify"]["reboot_message"].as_s, log)
+  notify_key = YAML::Any.new("notify")
+  if reboot_required? && config[notify_key].as_h[YAML::Any.new("enabled")].as_bool
+    send_notification(config[notify_key].as_h[YAML::Any.new("reboot_message")].as_s)
   end
-
-  log.info("Hacker Updater finished. Success: #{overall_success}")
+  Log.info { "Hacker Updater finished. Success: #{overall_success}" }
 end
-
 # Run main if not daemon or for testing
 main
